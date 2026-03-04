@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>HORROR — Don't Look Back</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;}
+body{background:#000;overflow:hidden;font-family:'Courier New',monospace;}
+canvas{display:block;width:100vw;height:100vh;}
+#hud{position:fixed;top:0;left:0;width:100%;pointer-events:none;}
+#top-bar{display:flex;justify-content:space-between;align-items:center;padding:14px 20px;}
+.hud-pill{background:rgba(5,0,0,0.9);border:1px solid rgba(180,0,0,0.4);color:#cc0000;font-size:12px;letter-spacing:3px;padding:6px 14px;}
+#sanity-bar{position:fixed;top:60px;left:20px;width:160px;}
+#sanity-label{font-size:10px;color:rgba(180,0,0,0.6);letter-spacing:3px;margin-bottom:5px;}
+#sanity-track{height:4px;background:rgba(100,0,0,0.4);position:relative;}
+#sanity-fill{height:100%;background:#cc0000;width:100%;transition:width 0.5s;box-shadow:0 0 8px #ff0000;}
+#items{position:fixed;bottom:20px;left:20px;color:rgba(180,0,0,0.5);font-size:11px;letter-spacing:2px;line-height:2;}
+#msg{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center;pointer-events:none;display:none;}
+#msg-title{font-size:48px;font-weight:bold;color:#cc0000;letter-spacing:6px;text-shadow:0 0 40px #ff0000;margin-bottom:12px;}
+#msg-sub{font-size:14px;color:rgba(200,0,0,0.6);letter-spacing:3px;}
+#overlay{position:fixed;inset:0;background:rgba(0,0,0,0);pointer-events:none;transition:background 0.5s;}
+#vignette{position:fixed;inset:0;background:radial-gradient(ellipse at center,transparent 40%,rgba(0,0,0,0.8) 100%);pointer-events:none;}
+#static{position:fixed;inset:0;opacity:0;pointer-events:none;background:url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="300" height="300"><filter id="n"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="4"/><feColorMatrix type="saturate" values="0"/></filter><rect width="300" height="300" filter="url(%23n)" opacity="0.15"/></svg>');transition:opacity 0.1s;}
+#controls{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);color:rgba(150,0,0,0.35);font-size:11px;letter-spacing:2px;}
+#start-msg{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:#000;z-index:100;}
+#start-inner{text-align:center;max-width:500px;padding:40px;}
+#start-inner h1{font-size:52px;font-weight:bold;color:#cc0000;letter-spacing:8px;text-shadow:0 0 40px #ff0000;margin-bottom:16px;}
+#start-inner p{color:rgba(180,0,0,0.6);font-size:13px;letter-spacing:2px;line-height:1.8;margin-bottom:30px;}
+#start-btn{background:transparent;border:1px solid #cc0000;color:#cc0000;font-family:'Courier New',monospace;font-size:13px;letter-spacing:5px;padding:14px 40px;cursor:pointer;transition:all 0.2s;}
+#start-btn:hover{background:rgba(200,0,0,0.1);text-shadow:0 0 20px #ff0000;}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="hud">
+  <div id="top-bar">
+    <div class="hud-pill">DON'T LOOK BACK</div>
+    <div class="hud-pill" id="key-count">KEYS: 0 / 3</div>
+  </div>
+  <div id="sanity-bar">
+    <div id="sanity-label">SANITY</div>
+    <div id="sanity-track"><div id="sanity-fill"></div></div>
+  </div>
+</div>
+<div id="items">FIND 3 KEYS<br>REACH THE EXIT<br>DON'T LET IT SEE YOU</div>
+<div id="msg"><div id="msg-title" id="msg-title"></div><div id="msg-sub" id="msg-sub"></div></div>
+<div id="overlay"></div>
+<div id="vignette"></div>
+<div id="static"></div>
+<div id="controls">WASD — MOVE · MOUSE — LOOK · CLICK — INTERACT</div>
+
+<div id="start-msg">
+  <div id="start-inner">
+    <h1>HORROR</h1>
+    <p>You are trapped. The exit is locked.<br>Find the 3 keys hidden in the darkness.<br><br><em style="color:rgba(200,0,0,0.4)">Something is watching you.</em></p>
+    <button id="start-btn">ENTER IF YOU DARE</button>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+const params=new URLSearchParams(location.search);
+const PLAYER_NAME=params.get('user')||'VICTIM';
+
+// ── RENDERER ─────────────────────────────────────────────────────────
+const renderer=new THREE.WebGLRenderer({canvas:document.getElementById('c'),antialias:false});
+renderer.setPixelRatio(1);renderer.setSize(innerWidth,innerHeight);
+renderer.shadowMap.enabled=true;renderer.toneMapping=THREE.LinearToneMapping;renderer.toneMappingExposure=0.6;
+window.addEventListener('resize',()=>{renderer.setSize(innerWidth,innerHeight);camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();});
+
+const scene=new THREE.Scene();scene.background=new THREE.Color(0x000000);scene.fog=new THREE.Fog(0x000000,4,22);
+const camera=new THREE.PerspectiveCamera(75,innerWidth/innerHeight,0.1,100);camera.position.set(1.5,1.6,1.5);
+
+// Lighting — nearly dark
+scene.add(new THREE.AmbientLight(0x110000,0.8));
+
+// Flashlight
+const flashlight=new THREE.SpotLight(0xffeedd,8,20,Math.PI/8,0.5,1.5);
+flashlight.castShadow=true;flashlight.shadow.mapSize.set(512,512);
+const flashTarget=new THREE.Object3D();scene.add(flashTarget);flashlight.target=flashTarget;
+scene.add(flashlight);
+
+// Red point light (blood/horror ambiance)
+const redGlow=new THREE.PointLight(0x440000,2,10);scene.add(redGlow);
+
+// ── MAZE ─────────────────────────────────────────────────────────────
+// 1=wall, 0=floor, 2=player start, 3=exit, 4=key
+const MAP=[
+  [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+  [1,2,0,0,1,0,0,0,1,0,0,0,0,0,1],
+  [1,0,1,0,1,0,1,0,1,0,1,1,1,0,1],
+  [1,0,1,0,0,0,1,0,0,0,0,0,1,4,1],
+  [1,0,1,1,1,0,1,1,1,0,1,0,1,0,1],
+  [1,0,0,0,0,0,0,0,1,0,1,0,0,0,1],
+  [1,1,1,0,1,1,1,0,1,0,1,1,1,0,1],
+  [1,4,0,0,1,0,0,0,0,0,0,0,0,0,1],
+  [1,0,1,1,1,0,1,1,1,1,1,0,1,1,1],
+  [1,0,0,0,0,0,1,0,0,0,0,0,1,0,1],
+  [1,1,1,0,1,0,1,0,1,1,1,0,1,0,1],
+  [1,0,0,0,1,0,0,0,1,4,0,0,0,0,1],
+  [1,0,1,1,1,1,1,0,1,0,1,1,1,0,1],
+  [1,0,0,0,0,0,0,0,0,0,0,0,0,3,1],
+  [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+];
+const CELL=3,WALL_H=3.5;
+const wallMat=new THREE.MeshLambertMaterial({color:0x0a0505});
+const floorMat=new THREE.MeshLambertMaterial({color:0x050202});
+const ceilMat=new THREE.MeshLambertMaterial({color:0x030101});
+
+let startPos={x:1.5*CELL,z:1.5*CELL};
+let exits=[],keyObjects=[],keysCollected=0;
+const colliders=[];
+
+MAP.forEach((row,ri)=>{
+  row.forEach((cell,ci)=>{
+    const wx=(ci+0.5)*CELL,wz=(ri+0.5)*CELL;
+    if(cell===1){
+      const wm=new THREE.Mesh(new THREE.BoxGeometry(CELL,WALL_H,CELL),wallMat);
+      wm.position.set(wx,WALL_H/2,wz);wm.castShadow=true;wm.receiveShadow=true;scene.add(wm);
+      colliders.push({x:wx,z:wz,hw:CELL/2,hd:CELL/2});
+    } else {
+      const fm=new THREE.Mesh(new THREE.PlaneGeometry(CELL,CELL),floorMat);
+      fm.rotation.x=-Math.PI/2;fm.position.set(wx,0,wz);fm.receiveShadow=true;scene.add(fm);
+      const cm=new THREE.Mesh(new THREE.PlaneGeometry(CELL,CELL),ceilMat);
+      cm.rotation.x=Math.PI/2;cm.position.set(wx,WALL_H,wz);scene.add(cm);
+      if(cell===2){startPos={x:wx,z:wz};}
+      if(cell===3){
+        // Exit door
+        const em=new THREE.Mesh(new THREE.BoxGeometry(CELL*0.8,WALL_H*0.85,0.2),new THREE.MeshLambertMaterial({color:0x440000,emissive:0x660000,emissiveIntensity:0.5}));
+        em.position.set(wx,WALL_H/2,wz);scene.add(em);
+        exits.push({mesh:em,x:wx,z:wz});
+        const el=new THREE.PointLight(0xff0000,3,8);el.position.set(wx,2,wz);scene.add(el);
+      }
+      if(cell===4){
+        // Key
+        const kg=new THREE.Mesh(new THREE.TorusGeometry(0.2,0.06,8,16),new THREE.MeshStandardMaterial({color:0xddaa00,emissive:0xffcc00,emissiveIntensity:1,metalness:1,roughness:0}));
+        kg.position.set(wx,1.2,wz);scene.add(kg);
+        const kl=new THREE.PointLight(0xffcc00,3,6);kl.position.set(wx,1.5,wz);scene.add(kl);
+        keyObjects.push({mesh:kg,light:kl,x:wx,z:wz,collected:false});
+      }
+    }
+  });
+});
+
+// ── ENTITY (The Monster) ──────────────────────────────────────────────
+const entityGroup=new THREE.Group();
+const eBodyMat=new THREE.MeshStandardMaterial({color:0x111111,roughness:1,metalness:0});
+function addPart(w,h,d,y){const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),eBodyMat);m.position.y=y;entityGroup.add(m);}
+addPart(0.9,1.8,0.5,0.9);// body
+addPart(0.55,0.55,0.55,1.9);// head
+// Glowing red eyes
+const eyeMat=new THREE.MeshBasicMaterial({color:0xff0000});
+[-0.15,0.15].forEach(ex=>{const e=new THREE.Mesh(new THREE.SphereGeometry(0.06,6,6),eyeMat);e.position.set(ex,1.95,0.28);entityGroup.add(e);});
+addPart(0.2,1.4,0.3,-0.15+0.4,);// leg offset via separate
+entityGroup.position.set(12*CELL,0,12*CELL);
+scene.add(entityGroup);
+// Entity light
+const entityLight=new THREE.PointLight(0x440000,0,15);entityGroup.add(entityLight);
+
+// ── STATE ─────────────────────────────────────────────────────────────
+let px=startPos.x,py=1.6,pz=startPos.z;
+let yaw=0,pitch=0,locked=false,started=false,dead=false,won=false;
+let sanity=100,caughtTimer=0;
+const keys={};
+const SPEED=4,ENTITY_SPEED=1.4,HEAR_DIST=8,SEE_DIST=6;
+let heartbeatInterval=null;
+
+function wallCheck(nx,nz,r=0.35){
+  for(const c of colliders){
+    if(Math.abs(nx-c.x)<c.hw+r&&Math.abs(nz-c.z)<c.hd+r)return true;
+  }
+  return false;
+}
+
+document.getElementById('start-btn').addEventListener('click',()=>{
+  document.getElementById('start-msg').style.display='none';
+  camera.position.set(startPos.x,1.6,startPos.z);
+  document.body.requestPointerLock();
+  started=true;
+  addHeartbeat();
+});
+
+document.addEventListener('pointerlockchange',()=>{locked=document.pointerLockElement===document.body;});
+document.addEventListener('mousemove',e=>{if(!locked)return;yaw-=e.movementX*0.002;pitch-=e.movementY*0.002;pitch=Math.max(-1.2,Math.min(1.2,pitch));});
+document.addEventListener('keydown',e=>{keys[e.code]=true;if(e.code==='Space')e.preventDefault();});
+document.addEventListener('keyup',e=>keys[e.code]=false);
+
+function addHeartbeat(){
+  // Ambient creaking sounds via Web Audio
+  try{
+    const ac=new AudioContext();
+    function beat(){
+      const o=ac.createOscillator();const g=ac.createGain();
+      o.connect(g);g.connect(ac.destination);
+      o.frequency.value=60;o.type='sine';
+      g.gain.setValueAtTime(0,ac.currentTime);
+      g.gain.linearRampToValueAtTime(0.08,ac.currentTime+0.05);
+      g.gain.linearRampToValueAtTime(0,ac.currentTime+0.3);
+      o.start();o.stop(ac.currentTime+0.35);
+    }
+    function doBeat(){beat();setTimeout(()=>{beat();const bpm=40+Math.floor((100-sanity)*0.8);heartbeatInterval=setTimeout(doBeat,60000/bpm);},200);}
+    doBeat();
+  }catch(e){}
+}
+
+function playCreak(){
+  try{
+    const ac=new AudioContext();const o=ac.createOscillator();const g=ac.createGain();
+    o.connect(g);g.connect(ac.destination);o.type='sawtooth';o.frequency.value=80+Math.random()*60;
+    g.gain.setValueAtTime(0.05,ac.currentTime);g.gain.linearRampToValueAtTime(0,ac.currentTime+0.8);
+    o.start();o.stop(ac.currentTime+0.9);
+  }catch(e){}
+}
+
+function playScream(){
+  try{
+    const ac=new AudioContext();const o=ac.createOscillator();const g=ac.createGain();
+    o.connect(g);g.connect(ac.destination);o.type='sawtooth';
+    o.frequency.setValueAtTime(200,ac.currentTime);o.frequency.linearRampToValueAtTime(800,ac.currentTime+0.3);
+    o.frequency.linearRampToValueAtTime(100,ac.currentTime+1.5);
+    g.gain.setValueAtTime(0.3,ac.currentTime);g.gain.linearRampToValueAtTime(0,ac.currentTime+1.5);
+    o.start();o.stop(ac.currentTime+1.6);
+  }catch(e){}
+}
+
+let lastCreak=0;
+
+// ── GAME LOOP ─────────────────────────────────────────────────────────
+const clock=new THREE.Clock();let time=0;
+
+(function loop(){
+  requestAnimationFrame(loop);
+  if(!started)return;
+  const dt=Math.min(clock.getDelta(),0.05);time+=dt;
+
+  if(dead||won){renderer.render(scene,camera);return;}
+
+  // Key rotation
+  keyObjects.forEach(k=>{if(!k.collected){k.mesh.rotation.y+=dt*2;k.mesh.position.y=1.2+Math.sin(time*2)*0.1;}});
+
+  // Entity AI
+  const edx=px-entityGroup.position.x,edz=pz-entityGroup.position.z;
+  const eDist=Math.sqrt(edx*edx+edz*edz);
+  entityLight.intensity=Math.max(0,1-(eDist/20))*4;
+
+  // Entity chases when close or when player looks away
+  let entityActive=eDist<HEAR_DIST;
+  if(entityActive){
+    const eDir=new THREE.Vector3(edx,0,edz).normalize();
+    const enx=entityGroup.position.x+eDir.x*ENTITY_SPEED*dt;
+    const enz=entityGroup.position.z+eDir.z*ENTITY_SPEED*dt;
+    if(!wallCheck(enx,enz,0.4)){entityGroup.position.x=enx;entityGroup.position.z=enz;}
+    entityGroup.rotation.y=Math.atan2(edx,edz);
+    // Subtle movement animation
+    entityGroup.position.y=Math.sin(time*8)*0.05;
+  }
+
+  // Sanity drain when entity is close
+  if(eDist<SEE_DIST){sanity=Math.max(0,sanity-dt*15);}
+  else if(eDist<HEAR_DIST){sanity=Math.max(0,sanity-dt*3);}
+  else{sanity=Math.min(100,sanity+dt*2);}
+  document.getElementById('sanity-fill').style.width=sanity+'%';
+  document.getElementById('sanity-fill').style.background=sanity<30?'#ff0000':sanity<60?'#aa2200':'#cc0000';
+
+  // Random creaking
+  if(time-lastCreak>8+Math.random()*12){lastCreak=time;playCreak();}
+
+  // Screen effects from sanity
+  const insaneAlpha=Math.max(0,(50-sanity)/50*0.4);
+  document.getElementById('static').style.opacity=insaneAlpha;
+  if(sanity<20){document.getElementById('overlay').style.background=`rgba(100,0,0,${(20-sanity)/20*0.3})`;}
+  else{document.getElementById('overlay').style.background='rgba(0,0,0,0)';}
+
+  // Camera shake when insane
+  const shakeAmt=Math.max(0,(30-sanity)/30)*0.015;
+  if(shakeAmt>0){
+    camera.position.x+=Math.sin(time*13)*shakeAmt;
+    camera.position.z+=Math.cos(time*17)*shakeAmt;
+    camera.position.y+=Math.sin(time*19)*shakeAmt*0.5;
+  }
+
+  // Caught
+  if(eDist<1.2){
+    if(!dead){dead=true;playScream();
+      document.getElementById('overlay').style.background='rgba(200,0,0,0.8)';
+      document.getElementById('msg-title').textContent='IT GOT YOU';
+      document.getElementById('msg-sub').textContent='CLICK TO TRY AGAIN';
+      document.getElementById('msg').style.display='block';
+      document.getElementById('msg').addEventListener('click',()=>location.reload());
+    }
+    renderer.render(scene,camera);return;
+  }
+
+  // Player move
+  // FPS movement - purely horizontal, no pitch affect on direction
+  const fwd=new THREE.Vector3(-Math.sin(yaw),0,-Math.cos(yaw));
+  const rgt=new THREE.Vector3(Math.cos(yaw),0,-Math.sin(yaw));
+  const mv=new THREE.Vector3();
+  if(keys['KeyW']||keys['ArrowUp'])mv.add(fwd);
+  if(keys['KeyS']||keys['ArrowDown'])mv.sub(fwd);
+  if(keys['KeyA']||keys['ArrowLeft'])mv.sub(rgt);
+  if(keys['KeyD']||keys['ArrowRight'])mv.add(rgt);
+  if(mv.lengthSq()>0)mv.normalize().multiplyScalar(SPEED*dt);
+  const nx=px+mv.x,nz=pz+mv.z;
+  if(!wallCheck(nx,pz))px=nx;
+  if(!wallCheck(px,nz))pz=nz;
+  // Footstep bob
+  const bobAmt = mv.lengthSq()>0.001 ? Math.sin(time*10)*0.04 : 0;
+  camera.position.set(px, py+bobAmt, pz);
+  camera.rotation.order='YXZ';camera.rotation.y=yaw;camera.rotation.x=pitch;
+
+  // Flashlight
+  const flashDir=new THREE.Vector3(0,0,-1).applyEuler(camera.rotation);
+  flashlight.position.copy(camera.position);
+  flashTarget.position.copy(camera.position).add(flashDir.multiplyScalar(10));
+
+  // Red glow wanders
+  redGlow.position.set(Math.sin(time*0.3)*20+7*CELL,1.5,Math.cos(time*0.2)*20+7*CELL);
+
+  // Key pickup
+  keyObjects.forEach(k=>{
+    if(!k.collected){
+      const dx=px-k.x,dz=pz-k.z;
+      if(Math.sqrt(dx*dx+dz*dz)<1.2){
+        k.collected=true;keysCollected++;
+        scene.remove(k.mesh);scene.remove(k.light);
+        document.getElementById('key-count').textContent=`KEYS: ${keysCollected} / 3`;
+        // Sanity restore
+        sanity=Math.min(100,sanity+20);
+        if(keysCollected===3){
+          const zm=document.getElementById('msg');
+          document.getElementById('msg-title').textContent='ALL KEYS FOUND';
+          document.getElementById('msg-sub').textContent='FIND THE RED DOOR';
+          zm.style.display='block';setTimeout(()=>zm.style.display='none',2500);
+        }
+      }
+    }
+  });
+
+  // Exit check
+  if(keysCollected>=3){
+    exits.forEach(ex=>{
+      const dx=px-ex.x,dz=pz-ex.z;
+      if(Math.sqrt(dx*dx+dz*dz)<1.5){
+        if(!won){won=true;
+          document.getElementById('overlay').style.background='rgba(0,50,0,0.6)';
+          document.getElementById('msg-title').textContent='YOU ESCAPED';
+          document.getElementById('msg-title').style.color='#00ff44';
+          document.getElementById('msg-sub').textContent='CLICK TO RETURN';
+          document.getElementById('msg').style.display='block';
+          document.getElementById('msg').addEventListener('click',()=>location.href='login.html');
+        }
+      }
+    });
+  }
+
+  renderer.render(scene,camera);
+})();
+</script>
+</body>
+</html>

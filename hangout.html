@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>HANGOUT — Chill World</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;}
+body{background:#001a2e;overflow:hidden;font-family:'Courier New',monospace;}
+canvas{display:block;width:100vw;height:100vh;}
+#hud{position:fixed;top:0;left:0;width:100%;pointer-events:none;}
+#top-bar{display:flex;justify-content:space-between;align-items:center;padding:14px 20px;background:rgba(0,0,0,0.4);}
+.hud-pill{background:rgba(0,20,40,0.85);border:1px solid rgba(0,200,255,0.35);color:#66ddff;font-size:12px;letter-spacing:2px;padding:6px 14px;}
+#zone-name{color:#fff;font-size:15px;font-weight:bold;letter-spacing:4px;text-shadow:0 0 20px #00ccff;}
+#player-count{color:#66ddff;font-size:12px;letter-spacing:2px;}
+#emote-bar{position:fixed;bottom:60px;left:50%;transform:translateX(-50%);display:flex;gap:8px;pointer-events:all;}
+.emote-btn{background:rgba(0,20,40,0.9);border:1px solid rgba(0,200,255,0.4);color:#66ddff;font-size:18px;width:48px;height:48px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all 0.15s;border-radius:2px;}
+.emote-btn:hover{background:rgba(0,100,200,0.4);border-color:#00ccff;transform:translateY(-3px);}
+.emote-btn.active{border-color:#00ff88;color:#00ff88;box-shadow:0 0 16px rgba(0,255,136,0.4);}
+#emote-label{position:fixed;bottom:116px;left:50%;transform:translateX(-50%);color:#66ddff;font-size:11px;letter-spacing:2px;}
+#controls{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);color:rgba(100,200,255,0.45);font-size:11px;letter-spacing:2px;}
+#zone-msg{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(0,20,40,0.92);border:1px solid rgba(0,200,255,0.4);color:#66ddff;font-family:'Courier New',monospace;font-size:13px;letter-spacing:2px;padding:20px 32px;text-align:center;display:none;pointer-events:none;}
+#chat-box{position:fixed;bottom:56px;right:20px;width:280px;pointer-events:all;}
+#chat-log{height:160px;overflow-y:auto;background:rgba(0,10,25,0.8);border:1px solid rgba(0,200,255,0.25);padding:8px;display:flex;flex-direction:column;gap:3px;margin-bottom:6px;}
+#chat-log::-webkit-scrollbar{width:3px;}
+#chat-log::-webkit-scrollbar-thumb{background:rgba(0,200,255,0.3);}
+.chat-msg{font-size:11px;color:#aaddff;line-height:1.5;}
+.chat-msg .cn{color:#00ccff;font-weight:bold;}
+.chat-msg.sys{color:#66ff99;font-style:italic;}
+#chat-input-row{display:flex;gap:0;}
+#chat-input{flex:1;background:rgba(0,10,25,0.9);border:1px solid rgba(0,200,255,0.3);border-right:none;color:#aaddff;font-family:'Courier New',monospace;font-size:11px;padding:7px 10px;outline:none;}
+#chat-input::placeholder{color:rgba(100,150,200,0.4);}
+#chat-send{background:rgba(0,100,200,0.2);border:1px solid rgba(0,200,255,0.3);color:#66ddff;font-size:10px;letter-spacing:1px;padding:7px 12px;cursor:pointer;}
+#chat-send:hover{background:rgba(0,100,200,0.4);}
+#start-msg{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,5,15,0.9);z-index:100;}
+#start-inner{text-align:center;}
+#start-inner h1{font-size:42px;font-weight:bold;color:#fff;letter-spacing:8px;text-shadow:0 0 40px #00ccff;margin-bottom:12px;}
+#start-inner p{color:#66ddff;font-size:13px;letter-spacing:3px;margin-bottom:30px;}
+#start-btn{background:transparent;border:1px solid #00ccff;color:#00ccff;font-family:'Courier New',monospace;font-size:13px;letter-spacing:5px;padding:14px 40px;cursor:pointer;transition:all 0.2s;}
+#start-btn:hover{background:rgba(0,200,255,0.1);}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="hud">
+  <div id="top-bar">
+    <div class="hud-pill" id="world-pill">HANGOUT WORLD</div>
+    <div id="zone-name">PLAZA</div>
+    <div class="hud-pill" id="player-count">1 ONLINE</div>
+  </div>
+</div>
+<div id="emote-label">EMOTES</div>
+<div id="emote-bar">
+  <button class="emote-btn" data-emote="wave" title="Wave">👋</button>
+  <button class="emote-btn" data-emote="dance" title="Dance">💃</button>
+  <button class="emote-btn" data-emote="sit" title="Sit">🪑</button>
+  <button class="emote-btn" data-emote="sleep" title="Sleep">😴</button>
+  <button class="emote-btn" data-emote="heart" title="Heart">❤️</button>
+  <button class="emote-btn" data-emote="lol" title="LOL">😂</button>
+</div>
+<div id="controls">WASD — MOVE · MOUSE — LOOK · T — CHAT · ESC — UNLOCK MOUSE</div>
+<div id="zone-msg"></div>
+
+<div id="chat-box">
+  <div id="chat-log"></div>
+  <div id="chat-input-row">
+    <input type="text" id="chat-input" placeholder="press T to chat..." maxlength="100" autocomplete="off" readonly/>
+    <button id="chat-send">SEND</button>
+  </div>
+</div>
+
+<div id="start-msg">
+  <div id="start-inner">
+    <h1>HANGOUT</h1>
+    <p>A chill world to explore and vibe in</p>
+    <button id="start-btn">ENTER WORLD</button>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+const params=new URLSearchParams(location.search);
+const PLAYER_NAME=params.get('user')||'WANDERER';
+let AV={bodyColor:'#00e5ff',visorColor:'#00aaff',accentColor:'#00e5ff',pattern:'SOLID'};
+try{AV={...AV,...JSON.parse(decodeURIComponent(params.get('av')||'{}'))};}catch(e){}
+function hexInt(h){return parseInt((h||'#00e5ff').replace('#',''),16);}
+
+// ── RENDERER ─────────────────────────────────────────────────────────
+const renderer=new THREE.WebGLRenderer({canvas:document.getElementById('c'),antialias:true});
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));renderer.setSize(innerWidth,innerHeight);
+renderer.shadowMap.enabled=true;renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=1.1;
+window.addEventListener('resize',()=>{renderer.setSize(innerWidth,innerHeight);camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();});
+
+const scene=new THREE.Scene();scene.fog=new THREE.Fog(0x001a2e,60,200);
+const camera=new THREE.PerspectiveCamera(70,innerWidth/innerHeight,0.1,400);
+
+// Sky gradient
+const skyGeo=new THREE.SphereGeometry(350,32,16);
+const skyMat=new THREE.ShaderMaterial({
+  side:THREE.BackSide,
+  uniforms:{topColor:{value:new THREE.Color(0x000d1a)},botColor:{value:new THREE.Color(0x001a2e)}},
+  vertexShader:`varying vec3 vPos; void main(){vPos=position;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}`,
+  fragmentShader:`varying vec3 vPos; uniform vec3 topColor,botColor; void main(){float t=clamp((vPos.y+100.)/200.,0.,1.);gl_FragColor=vec4(mix(botColor,topColor,t),1.);}`
+});
+scene.add(new THREE.Mesh(skyGeo,skyMat));
+
+// Lighting
+scene.add(new THREE.AmbientLight(0x223355,2));
+const moon=new THREE.DirectionalLight(0x5599ff,1.5);moon.position.set(-30,80,20);moon.castShadow=true;
+moon.shadow.mapSize.set(2048,2048);moon.shadow.camera.far=300;scene.add(moon);
+
+// ── WORLD BUILDING ───────────────────────────────────────────────────
+function makeBox(w,h,d,color,x,y,z,emissive=0,ei=0){
+  const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),new THREE.MeshStandardMaterial({color,emissive:emissive||color,emissiveIntensity:ei,roughness:0.6,metalness:0.2}));
+  m.position.set(x,y,z);m.castShadow=true;m.receiveShadow=true;scene.add(m);return m;
+}
+
+// Ground
+const ground=new THREE.Mesh(new THREE.PlaneGeometry(300,300),new THREE.MeshStandardMaterial({color:0x0a1a2a,roughness:0.9}));
+ground.rotation.x=-Math.PI/2;ground.receiveShadow=true;scene.add(ground);
+
+// Grid lines on ground
+for(let i=-15;i<=15;i++){
+  const lg=new THREE.Mesh(new THREE.PlaneGeometry(300,0.05),new THREE.MeshBasicMaterial({color:0x003366,transparent:true,opacity:0.3}));
+  lg.rotation.x=-Math.PI/2;lg.position.set(0,0.01,i*10);scene.add(lg);
+  const lg2=new THREE.Mesh(new THREE.PlaneGeometry(0.05,300),new THREE.MeshBasicMaterial({color:0x003366,transparent:true,opacity:0.3}));
+  lg2.rotation.x=-Math.PI/2;lg2.position.set(i*10,0.01,0);scene.add(lg2);
+}
+
+// Plaza platform
+makeBox(40,0.4,40,0x0d2035,0,0.2,0);
+
+// Fountain centerpiece
+makeBox(4,0.5,4,0x0d3050,0,0.45,0);
+makeBox(3,0.4,3,0x0a2540,0,0.85,0);
+makeBox(1.5,0.4,1.5,0x083050,0,1.2,0);
+// Water effect (emissive blue)
+makeBox(3.8,0.05,3.8,0x0066cc,0,0.67,0,0x0088ff,0.8);
+// Fountain light
+const fountainLight=new THREE.PointLight(0x00aaff,4,15);fountainLight.position.set(0,2,0);scene.add(fountainLight);
+
+// Benches around fountain
+[0,90,180,270].forEach(ang=>{
+  const rad=ang*Math.PI/180;const bx=Math.sin(rad)*8,bz=Math.cos(rad)*8;
+  makeBox(3,0.3,0.8,0x0d3050,bx,0.55,bz);
+  makeBox(3,0.25,0.1,0x0d3050,bx,0.9,bz-0.35);
+  // Bench light
+  const bl=new THREE.PointLight(0x004488,1.5,6);bl.position.set(bx,1.2,bz);scene.add(bl);
+});
+
+// Buildings in background
+const bldColors=[0x0a1f35,0x0d2a40,0x081828];
+[
+  [-50,0,-40,10,30,8],[50,0,-40,8,25,10],[-40,0,30,12,20,10],[45,0,35,9,22,12],
+  [-60,0,-10,8,18,8],[60,0,-10,10,20,8],
+].forEach(([x,y,z,w,h,d],i)=>{
+  const b=makeBox(w,h,d,bldColors[i%3],x,h/2,z);
+  // Windows
+  for(let wy=2;wy<h-1;wy+=2.5){
+    for(let wx=-w/2+1;wx<w/2;wx+=2){
+      const wm=new THREE.Mesh(new THREE.PlaneGeometry(0.8,0.8),new THREE.MeshBasicMaterial({color:Math.random()<0.6?0x225588:0x001122}));
+      wm.position.set(x+wx,wy,z+d/2+0.01);scene.add(wm);
+    }
+  }
+  const tl=new THREE.PointLight(0x2255aa,2,20);tl.position.set(x,h+2,z);scene.add(tl);
+});
+
+// Trees (stylized)
+function makeTree(x,z){
+  makeBox(0.4,3,0.4,0x0a1a10,x,1.5,z);
+  const fc=new THREE.Mesh(new THREE.ConeGeometry(2,4,8),new THREE.MeshStandardMaterial({color:0x0a3020,emissive:0x001a10,emissiveIntensity:0.3,roughness:0.8}));
+  fc.position.set(x,4.5,z);fc.castShadow=true;scene.add(fc);
+  const tl=new THREE.PointLight(0x00ff44,0.8,8);tl.position.set(x,3,z);scene.add(tl);
+}
+[[-15,15],[-15,-15],[15,15],[15,-15],[-20,0],[20,0],[0,20],[0,-20],[-25,25],[25,-25],[-25,-25],[25,25]].forEach(([x,z])=>makeTree(x,z));
+
+// Stars
+const starGeo=new THREE.BufferGeometry();const sv=[];
+for(let i=0;i<2000;i++)sv.push((Math.random()-0.5)*400,50+Math.random()*150,(Math.random()-0.5)*400);
+starGeo.setAttribute('position',new THREE.Float32BufferAttribute(sv,3));
+scene.add(new THREE.Points(starGeo,new THREE.PointsMaterial({color:0xaaddff,size:0.6,sizeAttenuation:true})));
+
+// Fireflies
+const ffGeo=new THREE.BufferGeometry();const ffv=[];const ffCount=40;
+for(let i=0;i<ffCount;i++)ffv.push((Math.random()-0.5)*60,1+Math.random()*3,(Math.random()-0.5)*60);
+ffGeo.setAttribute('position',new THREE.Float32BufferAttribute(ffv,3));
+const ffMesh=new THREE.Points(ffGeo,new THREE.PointsMaterial({color:0x88ffaa,size:0.25,sizeAttenuation:true}));
+scene.add(ffMesh);
+
+// Moon
+const moonMesh=new THREE.Mesh(new THREE.SphereGeometry(8,16,16),new THREE.MeshStandardMaterial({color:0xaaccff,emissive:0x557799,emissiveIntensity:0.5}));
+moonMesh.position.set(-80,90,-120);scene.add(moonMesh);
+
+// Zones
+const ZONES=[
+  {name:'PLAZA',x:0,z:0,r:22,color:'#00ccff'},
+  {name:'TREEHOUSE',x:-18,z:18,r:12,color:'#00ff88'},
+  {name:'ROOFTOP',x:25,z:-25,r:10,color:'#ff88cc'},
+  {name:'WATERFRONT',x:0,z:25,r:12,color:'#44aaff'},
+];
+
+// ── PLAYER ────────────────────────────────────────────────────────────
+const playerGroup=new THREE.Group();scene.add(playerGroup);
+const bodyM=new THREE.Mesh(new THREE.BoxGeometry(0.55,1.5,0.55),new THREE.MeshStandardMaterial({color:hexInt(AV.bodyColor),roughness:0.5,metalness:0.3}));
+bodyM.castShadow=true;playerGroup.add(bodyM);
+const headM=new THREE.Mesh(new THREE.BoxGeometry(0.4,0.4,0.4),new THREE.MeshStandardMaterial({color:hexInt(AV.bodyColor),roughness:0.5}));
+headM.position.y=0.95;headM.castShadow=true;playerGroup.add(headM);
+const visorM=new THREE.Mesh(new THREE.BoxGeometry(0.35,0.15,0.05),new THREE.MeshStandardMaterial({color:hexInt(AV.visorColor),emissive:hexInt(AV.visorColor),emissiveIntensity:0.7}));
+visorM.position.set(0,0.97,0.22);playerGroup.add(visorM);
+
+// Name tag (canvas sprite)
+function makeNameTag(name){
+  const cv=document.createElement('canvas');cv.width=256;cv.height=64;
+  const ctx=cv.getContext('2d');ctx.fillStyle='rgba(0,20,40,0.85)';ctx.fillRect(0,0,256,64);
+  ctx.strokeStyle='rgba(0,200,255,0.6)';ctx.lineWidth=2;ctx.strokeRect(1,1,254,62);
+  ctx.fillStyle='#66ddff';ctx.font='bold 22px Courier New';ctx.textAlign='center';
+  ctx.fillText(name.toUpperCase(),128,40);
+  const tex=new THREE.CanvasTexture(cv);
+  const sp=new THREE.Sprite(new THREE.SpriteMaterial({map:tex,transparent:true,depthTest:false}));
+  sp.scale.set(2,0.5,1);sp.position.y=1.5;return sp;
+}
+playerGroup.add(makeNameTag(PLAYER_NAME));
+
+// Emote bubble
+let emoteBubble=null,emoteTimer=0,currentEmote='';
+function showEmote(emote){
+  if(emoteBubble)playerGroup.remove(emoteBubble);
+  const emojis={wave:'👋',dance:'💃',sit:'🪑',sleep:'😴',heart:'❤️',lol:'😂'};
+  const cv=document.createElement('canvas');cv.width=128;cv.height=128;
+  const ctx=cv.getContext('2d');ctx.font='80px serif';ctx.textAlign='center';ctx.textBaseline='middle';
+  ctx.fillText(emojis[emote]||'?',64,64);
+  const tex=new THREE.CanvasTexture(cv);
+  emoteBubble=new THREE.Sprite(new THREE.SpriteMaterial({map:tex,transparent:true,depthTest:false}));
+  emoteBubble.scale.set(1.2,1.2,1);emoteBubble.position.y=2.2;
+  playerGroup.add(emoteBubble);emoteTimer=4;currentEmote=emote;
+  document.querySelectorAll('.emote-btn').forEach(b=>{b.classList.toggle('active',b.dataset.emote===emote);});
+}
+
+document.querySelectorAll('.emote-btn').forEach(btn=>{
+  btn.addEventListener('click',()=>showEmote(btn.dataset.emote));
+});
+
+let px=0,py=0.9,pz=0,pvy=0;
+const GRAVITY=-20,SPEED=7,JUMP=8;
+let yaw=0,pitch=0,locked=false,chatOpen=false,started=false;
+const keys={};
+
+document.getElementById('start-btn').addEventListener('click',()=>{
+  document.getElementById('start-msg').style.display='none';
+  document.body.requestPointerLock();
+  started=true;addChatMsg(null,'Welcome to the Hangout World, '+PLAYER_NAME.toUpperCase()+'! 👋');
+});
+document.addEventListener('pointerlockchange',()=>{
+  locked=document.pointerLockElement===document.body;
+});
+document.addEventListener('keydown',e=>{
+  if(e.code==='KeyT'&&!chatOpen){chatOpen=true;const inp=document.getElementById('chat-input');inp.removeAttribute('readonly');inp.focus();document.exitPointerLock();}
+  if(e.code==='Escape'&&chatOpen){chatOpen=false;document.getElementById('chat-input').setAttribute('readonly','');document.body.requestPointerLock();}
+  if(!chatOpen)keys[e.code]=true;
+  if(e.code==='Space')e.preventDefault();
+});
+document.addEventListener('keyup',e=>{keys[e.code]=false;});
+document.addEventListener('mousemove',e=>{if(!locked||chatOpen)return;yaw-=e.movementX*0.0018;pitch-=e.movementY*0.0018;pitch=Math.max(-0.9,Math.min(0.9,pitch));});
+
+function addChatMsg(name,text,sys){
+  const log=document.getElementById('chat-log');
+  const el=document.createElement('div');el.className='chat-msg'+(sys?' sys':'');
+  if(sys)el.textContent=text;
+  else el.innerHTML=`<span class="cn">${(name||'').toUpperCase()}:</span> ${text.replace(/</g,'&lt;')}`;
+  log.appendChild(el);log.scrollTop=log.scrollHeight;
+}
+function sendChat(){
+  const inp=document.getElementById('chat-input');const txt=inp.value.trim();
+  if(!txt)return;inp.value='';addChatMsg(PLAYER_NAME,txt);
+}
+document.getElementById('chat-send').addEventListener('click',()=>{sendChat();chatOpen=false;document.getElementById('chat-input').setAttribute('readonly','');document.body.requestPointerLock();});
+document.getElementById('chat-input').addEventListener('keydown',e=>{if(e.key==='Enter'){sendChat();chatOpen=false;e.target.setAttribute('readonly','');document.body.requestPointerLock();}});
+
+// Zone detection
+let currentZone='';
+function detectZone(){
+  for(const z of ZONES){
+    const dx=px-z.x,dz=pz-z.z;
+    if(Math.sqrt(dx*dx+dz*dz)<z.r){
+      if(z.name!==currentZone){
+        currentZone=z.name;
+        const zm=document.getElementById('zone-msg');zm.textContent='▸ '+z.name;zm.style.display='block';zm.style.borderColor=z.color;zm.style.color=z.color;
+        document.getElementById('zone-name').textContent=z.name;
+        document.getElementById('zone-name').style.textShadow=`0 0 20px ${z.color}`;
+        setTimeout(()=>zm.style.display='none',2000);
+      }
+      return;
+    }
+  }
+  if(currentZone){currentZone='';document.getElementById('zone-name').textContent='BETWEEN ZONES';}
+}
+
+// ── MAIN LOOP ─────────────────────────────────────────────────────────
+const clock=new THREE.Clock();
+let time=0;
+(function loop(){
+  requestAnimationFrame(loop);
+  if(!started)return;
+  const dt=Math.min(clock.getDelta(),0.05);time+=dt;
+
+  // Fireflies
+  const fpos=ffGeo.attributes.position;
+  for(let i=0;i<ffCount;i++){
+    fpos.setY(i,1.5+Math.sin(time*1.2+i*0.7)*1.5);
+    fpos.setX(i,fpos.getX(i)+Math.sin(time*0.5+i)*0.02);
+    fpos.setZ(i,fpos.getZ(i)+Math.cos(time*0.4+i)*0.02);
+  }
+  fpos.needsUpdate=true;
+
+  // Fountain shimmer
+  fountainLight.intensity=3+Math.sin(time*2)*1.5;
+  moonMesh.rotation.y+=0.001;
+
+  // Emote timer
+  if(emoteTimer>0){emoteTimer-=dt;if(emoteTimer<=0&&emoteBubble){playerGroup.remove(emoteBubble);emoteBubble=null;document.querySelectorAll('.emote-btn').forEach(b=>b.classList.remove('active'));}}
+
+  // Move
+  if(!chatOpen){
+    // Forward = INTO screen = negative Z in camera space
+    // Camera is at +sin(yaw), +cos(yaw) behind player, so forward = -sin, -cos  
+    const fwd=new THREE.Vector3(-Math.sin(yaw),0,-Math.cos(yaw));
+    const rgt=new THREE.Vector3(-Math.cos(yaw),0, Math.sin(yaw));
+    const mv=new THREE.Vector3();
+    if(keys['KeyW']||keys['ArrowUp'])mv.add(fwd);
+    if(keys['KeyS']||keys['ArrowDown'])mv.sub(fwd);
+    if(keys['KeyA']||keys['ArrowLeft'])mv.sub(rgt);
+    if(keys['KeyD']||keys['ArrowRight'])mv.add(rgt);
+    if(mv.lengthSq()>0)mv.normalize().multiplyScalar(SPEED*dt);
+    if((keys['Space'])&&py<=0.92){pvy=JUMP;keys['Space']=false;}
+    pvy+=GRAVITY*dt;
+    px+=mv.x;pz+=mv.z;py+=pvy*dt;
+    if(py<0.9){py=0.9;pvy=0;}
+    px=Math.max(-148,Math.min(148,px));pz=Math.max(-148,Math.min(148,pz));
+    if(mv.lengthSq()>0.001)playerGroup.rotation.y=Math.atan2(mv.x,mv.z);
+  }
+
+  playerGroup.position.set(px,py,pz);
+  detectZone();
+
+  // Walking bob
+  if(keys['KeyW']||keys['KeyS']||keys['KeyA']||keys['KeyD']){
+    bodyM.rotation.z=Math.sin(time*8)*0.04;
+  } else {bodyM.rotation.z*=0.9;}
+
+  // Camera - third person orbit with pitch
+  const camDist=7;
+  const hDist = camDist * Math.cos(pitch * 0.5);
+  const vOff  = camDist * Math.sin(pitch * 0.5) + 3;
+  camera.position.set(
+    px + Math.sin(yaw) * hDist,
+    py + vOff,
+    pz + Math.cos(yaw) * hDist
+  );
+  camera.lookAt(px, py + 0.6, pz);
+
+  renderer.render(scene,camera);
+})();
+</script>
+</body>
+</html>
