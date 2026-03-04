@@ -349,85 +349,182 @@ function isLight(h){if(!h||h.length<7)return false;const r=parseInt(h.slice(1,3)
 function avUrlParam(u){return encodeURIComponent(JSON.stringify(getAv(u)));}
 
 // ── VOICE CHAT (WebRTC) ────────────────────────────────────────────────
-let localStream=null,voiceActive=false;
+// ── VOICE CHAT (WebRTC, room-based) ──────────────────────────────────
+let localStream=null,voiceActive=false,voiceRoomCode=null;
 const peerConnections={};
-const ICE_SERVERS={iceServers:[{urls:'stun:stun.l.google.com:19302'},{urls:'stun:stun1.l.google.com:19302'}]};
+const ICE_SERVERS={iceServers:[
+  {urls:'stun:stun.l.google.com:19302'},
+  {urls:'stun:stun1.l.google.com:19302'},
+  {urls:'stun:stun2.l.google.com:19302'},
+]};
 let voiceChannel=null,voiceAbly=null,voiceClientId=null;
 
-async function startVoice(){
-  if(voiceActive){stopVoice();return;}
+// Called when joining/creating a room - starts voice for that room
+async function joinVoiceRoom(roomCode){
+  if(voiceRoomCode===roomCode&&voiceActive) return; // already in this room
+  if(voiceActive) await stopVoice(true); // leave old room first
+  voiceRoomCode=roomCode;
   try{
-    localStream=await navigator.mediaDevices.getUserMedia({audio:true,video:false});
+    if(!localStream){
+      localStream=await navigator.mediaDevices.getUserMedia({audio:true,video:false});
+      // Speaking indicator
+      const ac=new AudioContext();
+      const src=ac.createMediaStreamSource(localStream);
+      const analyser=ac.createAnalyser();analyser.fftSize=256;src.connect(analyser);
+      const data=new Uint8Array(analyser.frequencyBinCount);
+      setInterval(()=>{
+        if(!voiceActive)return;
+        analyser.getByteFrequencyData(data);
+        const vol=data.reduce((a,b)=>a+b,0)/data.length;
+        const speaking=vol>12;
+        document.getElementById('btn-voice').classList.toggle('speaking',speaking);
+      },100);
+    }
     voiceActive=true;
     document.getElementById('btn-voice').classList.add('active');
     document.getElementById('btn-voice').textContent='🎤 ON';
-    // Voice signaling via Ably
-    voiceClientId=CU+'_v_'+Math.random().toString(36).slice(2,5);
+
+    // Use stable clientId = username only (no random suffix)
+    voiceClientId=CU;
     voiceAbly=new Ably.Realtime({key:ABLY_KEY,clientId:voiceClientId});
     voiceAbly.connection.on('connected',()=>{
-      voiceChannel=voiceAbly.channels.get('voice:hub-'+CU.slice(0,3));
-      voiceChannel.presence.enter({name:CU});
-      voiceChannel.presence.subscribe(()=>syncVoicePeers());
+      // Channel name = exact room code so only roommates connect
+      voiceChannel=voiceAbly.channels.get('voice-room:'+roomCode);
+      voiceChannel.presence.enter({name:CU,av:getAv(CU)});
+      voiceChannel.presence.subscribe('enter', m=>{
+        if(m.clientId===voiceClientId)return;
+        syncVoicePeers();
+      });
+      voiceChannel.presence.subscribe('leave', m=>{
+        // Close that peer's connection
+        if(peerConnections[m.clientId]){
+          peerConnections[m.clientId].close();
+          delete peerConnections[m.clientId];
+        }
+        renderVoicePeers();
+      });
       voiceChannel.subscribe('offer',handleOffer);
       voiceChannel.subscribe('answer',handleAnswer);
       voiceChannel.subscribe('ice',handleIce);
       syncVoicePeers();
     });
-    // Speaking indicator via audio analyser
-    const ac=new AudioContext();const src=ac.createMediaStreamSource(localStream);
-    const analyser=ac.createAnalyser();analyser.fftSize=256;src.connect(analyser);
-    const data=new Uint8Array(analyser.frequencyBinCount);
-    setInterval(()=>{analyser.getByteFrequencyData(data);const vol=data.reduce((a,b)=>a+b,0)/data.length;const speaking=vol>15;document.getElementById('btn-voice').classList.toggle('speaking',speaking&&voiceActive);},100);
-    toast('VOICE CHAT ON — Mic active','green');
-  } catch(e){toast('Mic permission denied','red');}
+    toast('🎤 Voice joined — Room '+roomCode,'green');
+  } catch(e){
+    console.error('Voice error:',e);
+    if(e.name==='NotAllowedError') toast('Mic permission denied — check browser settings','red');
+    else toast('Voice failed: '+e.message,'red');
+  }
 }
 
-function stopVoice(){
-  if(localStream)localStream.getTracks().forEach(t=>t.stop());
-  Object.values(peerConnections).forEach(pc=>pc.close());Object.keys(peerConnections).forEach(k=>delete peerConnections[k]);
+async function stopVoice(silent){
+  if(localStream){localStream.getTracks().forEach(t=>t.stop());localStream=null;}
+  Object.values(peerConnections).forEach(pc=>{try{pc.close();}catch(e){}});
+  Object.keys(peerConnections).forEach(k=>delete peerConnections[k]);
   if(voiceAbly)try{voiceAbly.close();}catch(e){}
-  voiceActive=false;localStream=null;voiceChannel=null;voiceAbly=null;
+  voiceActive=false;voiceChannel=null;voiceAbly=null;voiceClientId=null;voiceRoomCode=null;
   document.getElementById('btn-voice').classList.remove('active','speaking');
   document.getElementById('btn-voice').textContent='🎤 VOICE';
   document.getElementById('voice-peers').innerHTML='';
-  toast('Voice off');
+  if(!silent) toast('Voice off');
 }
 
-async function syncVoicePeers(){
+function renderVoicePeers(){
   if(!voiceChannel||!voiceActive)return;
   voiceChannel.presence.get((err,members)=>{
     if(err)return;
     const peersEl=document.getElementById('voice-peers');peersEl.innerHTML='';
-    members.forEach(async m=>{
+    members.forEach(m=>{
       if(m.clientId===voiceClientId)return;
-      const pip=document.createElement('div');pip.className='voice-peer';pip.id='vp-'+m.clientId;pip.textContent='🔊 '+m.data.name.toUpperCase();
+      const pip=document.createElement('div');
+      pip.className='voice-peer';pip.id='vp-'+m.clientId;
+      const av=m.data.av||{};
+      pip.style.borderColor=(av.bodyColor||'var(--accent)');
+      pip.style.color=(av.bodyColor||'var(--accent)');
+      pip.textContent='🔊 '+(m.data.name||m.clientId).toUpperCase();
       peersEl.appendChild(pip);
-      if(!peerConnections[m.clientId]){
-        const pc=new RTCPeerConnection(ICE_SERVERS);
-        peerConnections[m.clientId]=pc;
-        if(localStream)localStream.getTracks().forEach(t=>pc.addTrack(t,localStream));
-        pc.ontrack=e=>{const audio=new Audio();audio.srcObject=e.streams[0];audio.play();};
-        pc.onicecandidate=e=>{if(e.candidate&&voiceChannel)voiceChannel.publish('ice',{to:m.clientId,from:voiceClientId,candidate:e.candidate});};
-        const offer=await pc.createOffer();await pc.setLocalDescription(offer);
-        if(voiceChannel)voiceChannel.publish('offer',{to:m.clientId,from:voiceClientId,sdp:offer});
-      }
     });
   });
 }
+
+async function syncVoicePeers(){
+  if(!voiceChannel||!voiceActive)return;
+  renderVoicePeers();
+  voiceChannel.presence.get(async (err,members)=>{
+    if(err)return;
+    for(const m of members){
+      if(m.clientId===voiceClientId)continue;
+      if(peerConnections[m.clientId])continue; // already connected
+      // Only the "alphabetically first" user initiates to avoid double-offer
+      if(voiceClientId < m.clientId){
+        await initiateCall(m.clientId);
+      }
+    }
+  });
+}
+
+async function initiateCall(peerId){
+  const pc=new RTCPeerConnection(ICE_SERVERS);
+  peerConnections[peerId]=pc;
+  if(localStream)localStream.getTracks().forEach(t=>pc.addTrack(t,localStream));
+  pc.ontrack=e=>{
+    let audio=document.getElementById('audio-'+peerId);
+    if(!audio){audio=document.createElement('audio');audio.id='audio-'+peerId;audio.autoplay=true;document.body.appendChild(audio);}
+    audio.srcObject=e.streams[0];
+  };
+  pc.onicecandidate=e=>{
+    if(e.candidate&&voiceChannel)
+      voiceChannel.publish('ice',{to:peerId,from:voiceClientId,candidate:e.candidate});
+  };
+  pc.onconnectionstatechange=()=>{
+    if(pc.connectionState==='failed'){pc.close();delete peerConnections[peerId];}
+  };
+  const offer=await pc.createOffer();
+  await pc.setLocalDescription(offer);
+  if(voiceChannel) voiceChannel.publish('offer',{to:peerId,from:voiceClientId,sdp:offer});
+}
+
 async function handleOffer(m){
   if(m.data.to!==voiceClientId||!voiceActive)return;
-  const pc=new RTCPeerConnection(ICE_SERVERS);peerConnections[m.data.from]=pc;
+  if(peerConnections[m.data.from]) return; // already have connection
+  const pc=new RTCPeerConnection(ICE_SERVERS);
+  peerConnections[m.data.from]=pc;
   if(localStream)localStream.getTracks().forEach(t=>pc.addTrack(t,localStream));
-  pc.ontrack=e=>{const audio=new Audio();audio.srcObject=e.streams[0];audio.play();};
-  pc.onicecandidate=e=>{if(e.candidate&&voiceChannel)voiceChannel.publish('ice',{to:m.data.from,from:voiceClientId,candidate:e.candidate});};
-  await pc.setRemoteDescription(m.data.sdp);
-  const answer=await pc.createAnswer();await pc.setLocalDescription(answer);
-  if(voiceChannel)voiceChannel.publish('answer',{to:m.data.from,from:voiceClientId,sdp:answer});
+  pc.ontrack=e=>{
+    let audio=document.getElementById('audio-'+m.data.from);
+    if(!audio){audio=document.createElement('audio');audio.id='audio-'+m.data.from;audio.autoplay=true;document.body.appendChild(audio);}
+    audio.srcObject=e.streams[0];
+  };
+  pc.onicecandidate=e=>{
+    if(e.candidate&&voiceChannel)
+      voiceChannel.publish('ice',{to:m.data.from,from:voiceClientId,candidate:e.candidate});
+  };
+  pc.onconnectionstatechange=()=>{
+    if(pc.connectionState==='failed'){pc.close();delete peerConnections[m.data.from];}
+  };
+  await pc.setRemoteDescription(new RTCSessionDescription(m.data.sdp));
+  const answer=await pc.createAnswer();
+  await pc.setLocalDescription(answer);
+  if(voiceChannel) voiceChannel.publish('answer',{to:m.data.from,from:voiceClientId,sdp:answer});
 }
-async function handleAnswer(m){if(m.data.to!==voiceClientId)return;const pc=peerConnections[m.data.from];if(pc)await pc.setRemoteDescription(m.data.sdp);}
-async function handleIce(m){if(m.data.to!==voiceClientId)return;const pc=peerConnections[m.data.from];if(pc)try{await pc.addIceCandidate(m.data.candidate);}catch(e){}}
 
-document.getElementById('btn-voice').addEventListener('click',startVoice);
+async function handleAnswer(m){
+  if(m.data.to!==voiceClientId)return;
+  const pc=peerConnections[m.data.from];
+  if(pc&&pc.signalingState!=='stable') await pc.setRemoteDescription(new RTCSessionDescription(m.data.sdp));
+}
+
+async function handleIce(m){
+  if(m.data.to!==voiceClientId)return;
+  const pc=peerConnections[m.data.from];
+  if(pc)try{await pc.addIceCandidate(new RTCIceCandidate(m.data.candidate));}catch(e){}
+}
+
+// Manual voice toggle button - joins current room or a default hub room
+document.getElementById('btn-voice').addEventListener('click',()=>{
+  if(voiceActive){stopVoice();return;}
+  const roomCode=currentRoom?currentRoom.code:('hub-'+CU.slice(0,4));
+  joinVoiceRoom(roomCode);
+});
 
 // ── UTILS ─────────────────────────────────────────────────────────────
 function toast(msg,type='accent'){const el=document.getElementById('toast');el.textContent=msg;el.style.borderColor=type==='green'?'var(--green)':type==='red'?'var(--accent2)':'var(--accent)';el.style.color=type==='green'?'var(--green)':type==='red'?'var(--accent2)':'var(--accent)';el.classList.add('show');setTimeout(()=>el.classList.remove('show'),2600);}
@@ -601,6 +698,7 @@ document.getElementById('btn-create-room').addEventListener('click',()=>{
   currentRoom={code,game:g.id,host:CU,players:[CU]};
   showActiveRoom(code,g,[CU],true);connectRoomChannel(code,g);
   toast('ROOM CREATED: '+code,'green');
+  joinVoiceRoom(code);
 });
 document.getElementById('btn-join-room').addEventListener('click',()=>{
   const code=document.getElementById('join-code-input').value.trim().toUpperCase().replace(/[^A-Z0-9]/g,'');
@@ -608,8 +706,9 @@ document.getElementById('btn-join-room').addEventListener('click',()=>{
   currentRoom={code,game:null,host:null,players:[CU]};
   showActiveRoom(code,{title:'JOINING...',accent:'var(--accent)'},[CU],false);connectRoomChannel(code,null);
   toast('JOINING: '+code);
+  joinVoiceRoom(code);
 });
-document.getElementById('btn-leave-room').addEventListener('click',()=>{if(roomAbly)try{roomAbly.close();}catch(e){}roomAbly=null;roomChannel=null;currentRoom=null;document.getElementById('active-lobby-col').style.display='none';toast('LEFT ROOM');});
+document.getElementById('btn-leave-room').addEventListener('click',()=>{if(roomAbly)try{roomAbly.close();}catch(e){}roomAbly=null;roomChannel=null;currentRoom=null;document.getElementById('active-lobby-col').style.display='none';stopVoice();toast('LEFT ROOM');});
 document.getElementById('btn-active-launch').addEventListener('click',()=>{
   if(!currentRoom)return;
   const g=GAMES.find(x=>x.id===currentRoom.game)||GAMES[0];
