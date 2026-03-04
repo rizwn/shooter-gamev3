@@ -877,16 +877,35 @@ function renderSquad(){
 
 // ── SQUAD CHAT ────────────────────────────────────────────────────────
 function addSquadMsg(n,t,sys){const log=document.getElementById('squad-chat-log');const el=document.createElement('div');el.className='c-msg'+(sys?' sys':'');if(sys)el.textContent=t;else{const av=getAv(n||'');const col=av.bodyColor||'#00e5ff';el.innerHTML=`<span class="cn" style="color:${col}">${(n||'').toUpperCase()}:</span> ${t.replace(/</g,'&lt;')}`;}log.appendChild(el);log.scrollTop=log.scrollHeight;}
+let onlineUsers = new Set();
+
+function syncOnlineUsers(){
+  if(!ablyInst) return;
+  const presenceCh = ablyInst.channels.get('signal:presence');
+  presenceCh.presence.get((err, members) => {
+    if(err) return;
+    onlineUsers = new Set(members.map(m => m.data && m.data.name).filter(Boolean));
+    // refresh Signal sidebar if open
+    if(document.getElementById('tab-signal').style.display !== 'none') sgRenderSidebar();
+  });
+}
+
 function connectSquadChat(u){
   if(ablyInst)try{ablyInst.close();}catch(e){}
   const cid=u+'_'+Math.random().toString(36).slice(2,6);
   ablyInst=new Ably.Realtime({key:ABLY_KEY,clientId:cid});
   ablyInst.connection.on('connected',()=>{
+    // Squad chat channel
     ablyChannel=ablyInst.channels.get('hub-squad:'+u.slice(0,2));
     ablyChannel.presence.enter({name:u,av:getAv(u)});
     ablyChannel.subscribe('squad-chat',m=>{if(m.clientId===cid)return;addSquadMsg(m.data.n,m.data.t);});
     ablyChannel.presence.subscribe('enter',m=>{if(m.clientId===cid)return;addSquadMsg(null,m.data.name.toUpperCase()+' is online','sys');});
     addSquadMsg(null,'Online as '+u.toUpperCase(),'sys');
+    // Global presence for Signal online tab
+    const presenceCh = ablyInst.channels.get('signal:presence');
+    presenceCh.presence.enter({name:u, av:getAv(u)});
+    presenceCh.presence.subscribe(() => syncOnlineUsers());
+    syncOnlineUsers();
   });
 }
 function sendSquadChat(){const inp=document.getElementById('squad-chat-input');const t=inp.value.trim();if(!t||!ablyChannel)return;inp.value='';ablyChannel.publish('squad-chat',{n:CU,t});addSquadMsg(CU,t);}
@@ -1223,7 +1242,7 @@ function sgMakeConvItem(c){
 
 function sgGetChannel(convId){
   if(!sgChannels[convId]){
-    const ch=ably.channels.get('signal:conv:'+convId);
+    const ch=ablyInst.channels.get('signal:conv:'+convId);
     ch.subscribe('msg',m=>{
       const d=m.data;
       const db=sgGetDB(); if(!db[convId])db[convId]=[];
@@ -1261,7 +1280,7 @@ function sgOpenGroup(gid){
 }
 
 function sgOpenConv(){
-  if(!ably||ably.connection.state!=='connected'){toast('Connecting...','red');return;}
+  if(!ably||ablyInst.connection.state!=='connected'){toast('Connecting...','red');return;}
   document.getElementById('sg-empty').style.display='none';
   const cv=document.getElementById('sg-chat-view');cv.style.display='flex';
   sgUpdateHeader();sgLoadMsgs();sgGetChannel(sgActive.id);
@@ -1345,7 +1364,7 @@ function sgUpdateTyping(){
 }
 
 function sgSend(){
-  if(!sgActive||!ably||ably.connection.state!=='connected') return;
+  if(!sgActive||!ably||ablyInst.connection.state!=='connected') return;
   const inp=document.getElementById('sg-input');
   const text=inp.value.trim(); if(!text) return;
   const msg={from:CU,text,ts:Date.now(),convId:sgActive.id};
