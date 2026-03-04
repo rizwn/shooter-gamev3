@@ -1056,12 +1056,34 @@ function sgCh(convId){
   if(!ablyInst||ablyInst.connection.state!=='connected') return null;
   const ch = ablyInst.channels.get('signal2:'+convId);
   ch.subscribe('msg', m=>{
+    const msg=m.data;
+    // Ignore echo of our own sent messages (we already appended locally)
+    if(msg.from===CU) return;
     const db=sgDB();
     if(!db[convId]) db[convId]=[];
-    db[convId].push(m.data);
+    db[convId].push(msg);
     sgSaveDB(db);
-    if(SG.active && SG.active.id===convId){ sgAppend(m.data); sgScroll(); }
-    else { SG.unread[convId]=(SG.unread[convId]||0)+1; sgSidebar(); }
+    if(SG.active && SG.active.id===convId){
+      // Chat already open — just append
+      sgAppend(msg); sgScroll();
+    } else {
+      // Auto-open the chat for the sender
+      SG.unread[convId]=0;
+      // Figure out who sent it and open their conv
+      if(convId.startsWith('sg_dm:')){
+        sgOpenDM(msg.from);
+        // Switch to signal tab if not already there
+        if(document.getElementById('tab-signal').style.display==='none'){
+          switchTab('tab-signal');
+        }
+      } else if(convId.startsWith('sg_grp:')){
+        sgOpenGroup(convId.slice(7));
+        if(document.getElementById('tab-signal').style.display==='none'){
+          switchTab('tab-signal');
+        }
+      }
+      sgSidebar();
+    }
   });
   ch.subscribe('typing', m=>{
     if(m.data.u===CU) return;
